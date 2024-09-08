@@ -1,23 +1,29 @@
 import base64
 import random
 import string
+import secrets
+import os
 from datetime import datetime
-
 
 import psycopg2
 from flask import Flask, jsonify, render_template, redirect, url_for, request, flash, session
-from werkzeug.utils import secure_filename
-import secrets, os
-import predictor
-import numpy as np
-import cv2
 from flask_socketio import SocketIO, emit
 from werkzeug.utils import secure_filename
 from werkzeug.datastructures import FileStorage
 
-con = psycopg2.connect(database="xx", user="xx", password="xx",
-                       host="xx", port="5432")
-UPLOAD_FOLDER = 'uploads'
+import predictor
+
+# Database connection details
+con = psycopg2.connect(
+    database="postgres",
+    user="postgres",
+    password="Lovemylife",
+    host="localhost",
+    port="5432"
+)
+
+# Define upload folder
+UPLOAD_FOLDER = r'E:\projects\Pothole-Detection-Filtering-System-main\uploads'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 
 #create flask project
@@ -149,6 +155,10 @@ def login():
             msg = 'Incorrect username/password!'
     return render_template('login.html', msg=msg)
 
+def allowed_file(filename):
+    return '.' in filename and \
+        filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 #We then use the route() decorator to tell Flask what URL should trigger our function.
 @app.route("/upload", methods=['GET', 'POST'])
 def upload():
@@ -162,26 +172,26 @@ def upload():
 
         i = 0
         for file in files:
-            filename = secrets.token_hex(8)
-            _, f_ext = os.path.splitext(file.filename)
-            filename = filename + f_ext
-            pth = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(pth)
-            res = predictor.predict(pth)
-            # Save into Database
-            f = open(pth, 'rb')
-            file_data = f.read()
-            cursor = con.cursor()
-            res_int = 0
-            if res == "Plain Road":
-                res_int = 1
-            else:
-                res_int = 0
-            cursor.execute("INSERT INTO results(image, class, ext, tstamp) VALUES (%s,%s,%s, %s) RETURNING id",
-                           (file_data, res_int, f_ext, datetime.now()))
-            f.close()
-            con.commit()
-            resp.append({"no": i, "result": res, "img": base64.b64encode(file_data).decode("utf-8")})
+            if file and allowed_file(file.filename):
+                filename = secrets.token_hex(8)
+                _, f_ext = os.path.splitext(file.filename)
+                filename = filename + f_ext
+                pth = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(pth)
+                res = predictor.predict(pth)
+                # Save into Database
+                with open(pth, 'rb') as f:
+                    file_data = f.read()
+                    cursor = con.cursor()
+                    res_int = 0
+                    if res == "Plain Road":
+                        res_int = 1
+                    else:
+                        res_int = 0
+                    cursor.execute("INSERT INTO results(image, class, ext, tstamp) VALUES (%s,%s,%s, %s) RETURNING id",
+                        (file_data, res_int, f_ext, datetime.now()))
+                con.commit()
+                resp.append({"no": i, "result": res, "img": base64.b64encode(file_data).decode("utf-8")})
 
         flash("Results Fetched")
         return render_template("index2.html", context=resp)
@@ -224,9 +234,4 @@ def disconnect_user():
 
 
 if __name__ == '__main__':
-    app.run()
-
-
-def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    app.run(port=5000)
